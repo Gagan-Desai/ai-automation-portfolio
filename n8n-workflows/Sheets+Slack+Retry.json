@@ -1,0 +1,527 @@
+{
+  "name": "Sheets+Slack+Retry",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Form - RoleDescription",
+        "formDescription": "roles",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email"
+            },
+            {
+              "fieldLabel": "Role"
+            },
+            {
+              "fieldLabel": "Timestamp",
+              "fieldType": "date"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0bf0856c-31e1-428f-8a71-7fedfcf0bf22",
+      "name": "On form submission",
+      "webhookId": "51522e4c-e382-412e-b825-f4d4bd22021a"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"New form submission from {{ $json.Name }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "ea62e344-28df-4116-8958-37fcb327ec7d",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "95741cc9-792c-4ab5-a301-d0728db3bf1d",
+              "name": "Name",
+              "value": "={{ $json.Name }}",
+              "type": "string"
+            },
+            {
+              "id": "467bafe7-6b44-4e9e-93cf-38648371bedd",
+              "name": "Email",
+              "value": "={{ $json.Email }}",
+              "type": "string"
+            },
+            {
+              "id": "b06f56a7-f4ad-4f18-a7cb-34c102cdebf7",
+              "name": "role",
+              "value": "={{ $json.role }}",
+              "type": "string"
+            },
+            {
+              "id": "457f54a0-26ac-49b3-8ff6-761aa37219ce",
+              "name": "submitted_at",
+              "value": "={{ $json.Timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "a0121aec-f342-4e43-88a9-21c2722c7a10",
+              "name": "error_message",
+              "value": "={{ $json.error.message }}",
+              "type": "string"
+            },
+            {
+              "id": "a95eb992-cbfc-4f55-981b-54f82f53cfb0",
+              "name": "error_status",
+              "value": "={{ $json.error.status }}",
+              "type": "string"
+            },
+            {
+              "id": "a2996cea-51bf-4556-aedb-eccfa1692794",
+              "name": "failed_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        96
+      ],
+      "id": "c6416e63-c877-4e98-9c23-390813d7038b",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  item.json.idempotency_key = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        0
+      ],
+      "id": "945be6ed-ba37-4604-9688-12ad86ebb912",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit?pli=1&gid=440910719#gid=440910719",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 440910719,
+          "mode": "list",
+          "cachedResultName": "Idempotency",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit#gid=440910719"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Key",
+              "lookupValue": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        384,
+        0
+      ],
+      "id": "b971b9e8-7642-4c0b-b69f-4752186191d0",
+      "name": "Get row(s) in sheet",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KY7qUNVsVCKmSmgn",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "09d9a91d-3dba-49ec-9b52-5636e4abef07",
+              "leftValue": "={{ $json.row_number }}",
+              "rightValue": "=-1",
+              "operator": {
+                "type": "number",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        592,
+        0
+      ],
+      "id": "cbc76c5d-52b9-40d1-94b6-44717d3aa2b2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit?pli=1&gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 440910719,
+          "mode": "list",
+          "cachedResultName": "Idempotency",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit#gid=440910719"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Code in JavaScript1').item.json.Name }}",
+            "Email": "={{ $('Code in JavaScript1').item.json.Email }}",
+            "role": "={{ $('Code in JavaScript1').item.json.Role }}",
+            "Timestamp": "={{ $('Code in JavaScript1').item.json.Name }}",
+            "Key": "={{ $('Code in JavaScript1').item.json.idempotency_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Key",
+              "displayName": "Key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        880,
+        -32
+      ],
+      "id": "6c19bcc0-9792-4057-bcab-83ff9b397f86",
+      "name": "Idempotency",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KY7qUNVsVCKmSmgn",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit?pli=1&gid=0#gid=0",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 983178224,
+          "mode": "list",
+          "cachedResultName": "Failed_Submissions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit#gid=983178224"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.Name }}",
+            "Email": "=  {{ $json.Email }}",
+            "role": "={{ $json.role }}",
+            "submitted_at": "={{ $json.submitted_at }}",
+            "error_message": "={{ $json.error_message }}",
+            "error_status": "={{ $json.error_status }}",
+            "failed_at": "={{ $json.failed_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "submitted_at",
+              "displayName": "submitted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_status",
+              "displayName": "error_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_at",
+              "displayName": "failed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1456,
+        96
+      ],
+      "id": "a99a9564-1abb-456e-b690-5e51bba5b86a",
+      "name": "Failed Submissions",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KY7qUNVsVCKmSmgn",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        800,
+        224
+      ],
+      "id": "3ab82049-5097-4e28-8f71-e1f7eb3f67ec",
+      "name": "No Operation, do nothing"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Failed Submissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Idempotency",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Idempotency": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "5Q1m83fQbf6cXm3S",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "5f527352-2198-484b-9d77-7c6099c9dd1e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed3e0a2dd8b2e58630dee0e4518aac78f0af25b040530163d96e959be0849aff"
+  },
+  "nodeGroups": [],
+  "id": "LJMmHlEs6DrOBAv1",
+  "tags": []
+}
