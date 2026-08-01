@@ -1,0 +1,358 @@
+{
+  "name": "FX-Rates",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "34cbba41-e4cb-4243-a9e7-bd31cd29ab00",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://api.exchangerate-api.com/v4/latest/EUR",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "806794e2-14ee-462e-a0b4-390b264cc43e",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "notesInFlow": true,
+      "onError": "continueErrorOutput",
+      "notes": "FX Rates for EUR"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "91144a4e-f7d3-4719-b6d1-0892d2fa630f",
+              "name": "TimeStamp",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "5c02a070-f820-4bc0-b74f-aae5f3984cdd",
+              "name": "Log",
+              "value": "={{ $json.error.name }}{{ $json.error.message }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        416,
+        96
+      ],
+      "id": "a36eae6d-f77c-47f8-b984-5572369b6a76",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit?pli=1&gid=1592317881#gid=1592317881",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1592317881,
+          "mode": "list",
+          "cachedResultName": "FX",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DpgK26l_y2nJmSG_25HoktN5SfDuNMQN-AwaQh4fhDY/edit#gid=1592317881"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Log": "={{ $('Edit Fields').item.json.Log }}",
+            "TimeStamp": "={{ $('Edit Fields').item.json.TimeStamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Log",
+              "displayName": "Log",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TimeStamp",
+              "displayName": "TimeStamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        832,
+        96
+      ],
+      "id": "7439a206-95d4-48c8-9b8f-49f0b3972f14",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KY7qUNVsVCKmSmgn",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify('🚨 Request failed: ' + $('HTTP Request').item.json.error.name + ' - ' + $('HTTP Request').item.json.error.message) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        96
+      ],
+      "id": "5b08a692-a3cf-4582-87cf-a525f1b50630",
+      "name": "SLACK"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "rates = _items[0][\"json\"][\"rates\"]\ncurrencies = [\"EUR\", \"GBP\", \"JPY\", \"INR\"]\n\ncurrency_pairs = [\n    {\"json\": {\"currency\": currency, \"rate\": rate}}\n    for currency, rate in rates.items()\n    if currency in currencies\n]\n\n\n\nreturn currency_pairs"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "7b3e1d36-4dd6-44b2-afb0-f88034db8752",
+      "name": "Code in Python"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO fx_rates (currency, rate, fetched_at)\nVALUES ($1, $2, date_trunc('hour', NOW()))\nON CONFLICT (currency, fetched_at) DO NOTHING\nRETURNING currency;",
+        "options": {
+          "queryReplacement": "={{ $json.currency }}, {{ $json.rate }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        864,
+        -96
+      ],
+      "id": "74e07aa5-087f-4105-90d8-659ac38b0c88",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "Apck7RrX503zRcLX",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"FX rates updated\",\n  \"blocks\": [\n    {\n      \"type\": \"header\",\n      \"text\": { \"type\": \"plain_text\", \"text\": \"💱 FX Rates Updated\" }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": {{ JSON.stringify('*' + $('Code in Python').all().length + '* currencies processed') }}\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1024,
+        -96
+      ],
+      "id": "8aa85780-90ae-4027-ab5f-0fec46b03685",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1c318854-756a-4ed8-ad5b-c39013ebdcd7",
+              "leftValue": "={{ $json.rates }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        432,
+        -96
+      ],
+      "id": "99fb0c88-09a2-47ba-91f0-88d3487c16af",
+      "name": "If",
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "errorMessage": "\"An error occured\""
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        880,
+        240
+      ],
+      "id": "ac1ce7fa-7107-461c-a961-b92686ae1261",
+      "name": "Stop and Error"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "SLACK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SLACK": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in Python": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Code in Python",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "5fd85e65-bf5f-49fa-a464-f4f94d8789ba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed3e0a2dd8b2e58630dee0e4518aac78f0af25b040530163d96e959be0849aff"
+  },
+  "nodeGroups": [],
+  "id": "UlWYeybf9NfkLTPq",
+  "tags": []
+}
