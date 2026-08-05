@@ -18,7 +18,7 @@ print("Key loaded:", api_key is not None)
 
 
 payload = {
-    "model": "llama-3.1-8b-unreal",
+    "model": "llama-3.1-8b-instant",
     "messages": [
         {"role": "user", "content": "Explain what a REST API is in one sentence."}
     ]

@@ -1,0 +1,378 @@
+{
+  "name": "Dependency Health Monitor",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "71e6e835-8bed-43f7-9fb4-80bf31166881",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3944ae54-9dc9-43ee-b4d1-3e0a937d0bd0",
+              "leftValue": "={{ $json.github_repo }} ",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        0
+      ],
+      "id": "04aedd31-d243-4829-8baa-d88463097052",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dependency_health (package, health_score, recency_score, activity_score, security_score, historical_vuln_count, historical_vuln_ids, checked_at)\nVALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, date_trunc('day', NOW()))\nON CONFLICT (package, checked_at) DO UPDATE SET\n  health_score = EXCLUDED.health_score,\n  recency_score = EXCLUDED.recency_score,\n  activity_score = EXCLUDED.activity_score,\n  security_score = EXCLUDED.security_score,\n  historical_vuln_count = EXCLUDED.historical_vuln_count,\n  historical_vuln_ids = EXCLUDED.historical_vuln_ids\nRETURNING package, health_score;",
+        "options": {
+          "queryReplacement": "={{ $json.package }}, {{ $json.health_score }}, {{ $json.recency_score }}, {{ $json.activity_score }}, {{ $json.security_score }}, {{ $json.historical_vuln_count }}, {{ JSON.stringify($json.historical_vuln_ids) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        160
+      ],
+      "id": "93da5ec8-9ea6-4f1c-92da-38245a935ee5",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "Apck7RrX503zRcLX",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "packages = [\n    \"groq\" , \"ollama\", \"python-dotenv\", \"requests\", \"pytest\", \"fastapi\", \"aiohttp\", \"pandas\", \"numpy\", \"flask\", \"sqlalchemy\", \"pydantic\", \"httpx\", \"boto3\", \"click\",\n]\n\nreturn [{\"json\": {\"package\": name}} for name in packages]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "64a668e6-a4c7-4a3c-8c9d-4f714a961944",
+      "name": "packages List"
+    },
+    {
+      "parameters": {
+        "url": "=https://pypi.org/pypi/{{ $json.package }}/json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "9d5df22c-1b5e-4b3a-befb-b22586342ead",
+      "name": "HTTP Request - PYPI"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "pythonNative",
+        "pythonCode": "package_name = _item[\"json\"][\"info\"][\"name\"]\nlatest_version = _item[\"json\"][\"info\"][\"version\"]\nrelease_records = _item[\"json\"][\"releases\"][latest_version]\nupload_time = release_records[1][\"upload_time\"]\n\n\n\ntimestamps = [record[\"upload_time_iso_8601\"] for record in release_records]\nrelease_date = min(timestamps, default=None)\n\n\nproject_urls = _item[\"json\"][\"info\"].get(\"project_urls\") or {}\n\nprint(package_name)\nprint(latest_version)\nprint(release_date)\n\n\nGITHUB_BLOCKLIST = {\"sponsors\", \"orgs\", \"marketplace\", \"apps\"}\n\ndef trim_to_repo(url):\n    after_domain = url.split(\"github.com/\")[1]\n    segments = after_domain.split(\"/\")\n    owner = segments[0]\n    repo = segments[1]\n    return owner, repo\n\ndef is_real_repo(owner):\n    return owner.lower() not in GITHUB_BLOCKLIST\n\ndef extract_github_repo(project_urls):\n    github_candidates = [(key, value) for key, value in project_urls.items() if value and \"github.com\" in value]\n\n    for key, value in github_candidates:\n        owner, repo = trim_to_repo(value)\n        if is_real_repo(owner):\n            return f\"{owner}/{repo}\"\n\n    return None\n\ngithub_repo = extract_github_repo(project_urls)\ngithub_url = f\"https://github.com/{github_repo}\" if github_repo else None\n\nprint(github_url)\n\n\n\nreturn {\n    \"json\": {\n        \"package\": package_name,\n        \"latest_version\": latest_version,\n        \"release_date\": release_date,\n        \"github_repo\": github_repo\n    }\n}\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "fc5a8f08-6944-4770-a562-b5f54c960bee",
+      "name": "GitHub Details",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.github_repo }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        256,
+        288
+      ],
+      "id": "6811dccc-b719-4bd5-a463-8af1f80972b8",
+      "name": "HTTP Request - GitHub",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "UxDDcrEDz4j9wiYB",
+          "name": "GitHub"
+        },
+        "githubApi": {
+          "id": "IB1PyBJGd27XvLMt",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "pythonNative",
+        "pythonCode": "stars = _item[\"json\"][\"stargazers_count\"]\nlast_push = _item[\"json\"][\"pushed_at\"]\nis_archived = _item[\"json\"][\"archived\"]\nopen_issues = _item[\"json\"][\"open_issues_count\"]\npackage_name = _item[\"json\"][\"name\"]\n\nreturn {\n    \"json\": {\n        \"github_stars\": stars,\n        \"github_last_push\": last_push,\n        \"github_open_issues\": open_issues,\n        \"github_archived\": is_archived,\n        \"package_name\" : package_name\n    }\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        288
+      ],
+      "id": "5b7d9721-960f-47ea-a55d-a1cc570d907c",
+      "name": "Package Activity"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.osv.dev/v1/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"package\": {\n    \"name\": \"{{ $('packages List').item.json.package }}\",\n    \"ecosystem\": \"PyPI\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        288
+      ],
+      "id": "5fd0f923-8b49-4015-b60c-9bb8afcc0a72",
+      "name": "HTTP Request - OSV"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "pythonNative",
+        "pythonCode": "data = _item[\"json\"]\nvulns = data.get(\"vulns\", [])\nhistorical_vuln_count = len(vulns)\nhistorical_vuln_ids = [v[\"id\"] for v in vulns]\n\nreturn {\n    \"json\": {\n        \"historical_vuln_count\": historical_vuln_count,\n        \"historical_vuln_ids\": historical_vuln_ids\n    }\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        288
+      ],
+      "id": "43d76f01-f38b-4f3e-ba9c-ffeb6b06adb9",
+      "name": "Vulnerabilities"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {
+          "includeUnpaired": true
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1168,
+        144
+      ],
+      "id": "4acd59ae-1e4b-481b-8dfa-830027f56e93",
+      "name": "Merge - GitHub, OSV, PYPI"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const data = $json;\n\nfunction daysSince(isoString) {\n  const then = new Date(isoString);\n  const now = new Date();\n  return Math.floor((now - then) / (1000 * 60 * 60 * 24));\n}\n\nlet recencyScore;\nif (data.release_date) {\n  const days = daysSince(data.release_date);\n  recencyScore = Math.max(0, 100 - (days / 730 * 100));\n} else {\n  recencyScore = 0;\n}\n\nlet activityScore = null;\nlet activityAvailable = false;\nif (data.github_archived) {\n  activityScore = 0;\n  activityAvailable = true;\n} else if (data.github_last_push) {\n  const days = daysSince(data.github_last_push);\n  activityScore = Math.max(0, 100 - (days / 730 * 100));\n  activityAvailable = true;\n}\n\nconst vulnCount = data.historical_vuln_count || 0;\nconst securityScore = Math.max(0, 100 - vulnCount * 5);\n\nlet composite;\nif (activityAvailable) {\n  composite = recencyScore * 0.3 + activityScore * 0.3 + securityScore * 0.4;\n} else {\n  composite = recencyScore * (0.3 / 0.7) + securityScore * (0.4 / 0.7);\n}\n\nreturn {\n  json: {\n    ...data,\n    recency_score: Math.round(recencyScore * 10) / 10,\n    activity_score: activityAvailable ? Math.round(activityScore * 10) / 10 : null,\n    security_score: Math.round(securityScore * 10) / 10,\n    health_score: Math.round(composite * 10) / 10\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        160
+      ],
+      "id": "4314f854-8e51-465e-8771-95c2b19b907c",
+      "name": "Calculate Security, Activity, Recency"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "packages List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - GitHub",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge - GitHub, OSV, PYPI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request - GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "packages List": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - PYPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - PYPI": {
+      "main": [
+        [
+          {
+            "node": "GitHub Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Details": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - GitHub": {
+      "main": [
+        [
+          {
+            "node": "Package Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package Activity": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - OSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge - GitHub, OSV, PYPI",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP Request - OSV": {
+      "main": [
+        [
+          {
+            "node": "Vulnerabilities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vulnerabilities": {
+      "main": [
+        [
+          {
+            "node": "Merge - GitHub, OSV, PYPI",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge - GitHub, OSV, PYPI": {
+      "main": [
+        [
+          {
+            "node": "Calculate Security, Activity, Recency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Security, Activity, Recency": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c816cd2a-629d-48e2-823f-0f2798f5ea29",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ed3e0a2dd8b2e58630dee0e4518aac78f0af25b040530163d96e959be0849aff"
+  },
+  "nodeGroups": [],
+  "id": "kypld7Fe8ZJULfPI",
+  "tags": []
+}

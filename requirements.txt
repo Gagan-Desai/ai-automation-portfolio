@@ -3,3 +3,13 @@ ollama
 python-dotenv
 requests
 pytest
+fastapi
+aiohttp
+pandas
+numpy
+flask
+sqlalchemy
+pydantic
+httpx
+boto3
+click
