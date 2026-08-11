@@ -780,4 +780,53 @@ Hierarchical Summary     PRESERVED      5
 
 ---
 
-## Day 13 — *(not started yet)*
+## Day 13 — Structured Output Prompting: json_object vs. json_schema, Measured Not Assumed
+
+**Goal:** move past "ask the model nicely for JSON" — understand and build against the real reliability hierarchy Groq actually offers, and prove the difference between the approaches with real, comparable evidence rather than just reading about it.
+
+### The reliability hierarchy
+1. **Plain prompt instructions** — weakest, unreliable (markdown fences, preamble text, malformed syntax).
+2. **`json_object` mode** — guarantees syntactically valid JSON, never guarantees it matches any particular schema.
+3. **`json_schema` mode, `strict: true`** — constrained decoding at the token level; genuinely cannot produce a schema-violating response. **Real, current limitation confirmed via docs, not assumed: only supported on `openai/gpt-oss-20b` / `openai/gpt-oss-120b` on Groq right now — not on `llama-3.1-8b-instant`, which this whole roadmap has used since Day 1.** Hit this directly as a real 400 error before finding the actual supported models.
+4. **Pydantic + manual validation + corrective retry loop** — the practical, ergonomic pattern for models/modes that don't offer a server-side guarantee: catch `json.JSONDecodeError` (not valid JSON at all) and `pydantic.ValidationError` (valid JSON, wrong shape) as two genuinely separate failure categories, and feed the specific validation error back to the model on retry rather than blindly repeating the identical prompt — different in kind from Day 4's transient-failure retry decorator, since this one is *corrective*, not just persistent.
+
+### Composed Pydantic schema — small named pieces assembled into a whole
+`Category`, `Priority`, `Sentiment`, `EntityType` as enums (closed, fixed vocabularies — makes "only these exact values are valid" an enforced rule, not a hopeful instruction); `Entity` as a small nested shape (free-text + a constrained type); `TicketTriage` as the top-level composition, including `key_entities: List[Entity]` — a list where every item must itself satisfy a nested shape. **Real distinction worth remembering: "required" (the field must be present) and "non-empty" (a list must have ≥1 item) are different rules — Pydantic only enforces the first by default; use `Field(min_length=1)` for the second if genuinely needed.**
+
+### Real gotcha — strict mode's stricter schema requirements
+`additionalProperties: false` must be set on **every** object in the schema tree, or Groq rejects the schema outright before ever calling the model — including nested submodels like `Entity`, not just the top-level class. Fixed via `model_config = ConfigDict(extra="forbid")` on every `BaseModel` in the schema, which Pydantic then correctly reflects in its generated JSON Schema output.
+
+### Real evidence, not just theory — same ambiguous ticket through both approaches
+A deliberately category-less ticket (a partnership/marketing proposal, not cleanly fitting `urgent`/`billing`/`technical`/`general`) run through both:
+- **`json_object` + retry (llama-3.1-8b-instant):** failed on attempt 1 — invented `type: "department"` for an entity, a value that doesn't exist in the `EntityType` enum. Correctly self-corrected to `"organization"` on attempt 2 after the validation error was fed back.
+- **`json_schema` strict (gpt-oss-20b):** succeeded in **one** attempt — structurally incapable of producing an invalid enum value in the first place.
+**The real, concrete lesson from this comparison, not just a stated principle:** structured output guarantees **shape**, never **content correctness**. Running the same ambiguous ticket 5 times through both approaches showed `category`/`priority` perfectly stable across both, but `sentiment` genuinely wobbled — 100% consistent `positive` on the Llama/retry path, split between `neutral`/`positive` on the strict/gpt-oss path. **Worth stating precisely: the more rigorously schema-constrained approach was not the more content-consistent one** — strict mode's guarantee never touches which value the model judges correct, only which values are syntactically permitted. Two different model families being compared, not just two API parameters on the same model — worth remembering as a real nuance if this comes up in an interview.
+
+### Engineering hygiene
+Same module-separation pattern as Day 12: `models.py` (single shared schema — both approaches import the identical class, preventing silent schema drift between them), `extract_json_object.py`, `extract_json_schema.py`, `compare.py` — each approach genuinely independent and separately testable before being compared side by side.
+
+---
+
+## Day 14 — Classifier Evaluation: Measuring "Is It Actually Right," Not Just "Is It Valid JSON"
+
+**Goal, deliberately built as the natural complement to Day 13, not a repeat of it:** Day 13 proved format reliability. It never once asked whether the classification was *correct*. Reused the existing `TicketTriage` classifier as-is (`category`→category, `priority`→urgency, `requires_immediate_attention`→action_required — same shape as the roadmap's original Day 14 spec, no need to rebuild from scratch) and built a real, measured evaluation harness on top.
+
+### Ground truth — 9 hand-labeled real examples, deliberately including genuine ambiguity
+Built with intentional edge cases, not just easy wins: a bug report where urgency and actionability plausibly diverge (low urgency, but still a real fix needed), a ticket genuinely unclear between two categories (its own text admits the ambiguity). **Worth remembering as a real methodology point: ground truth is a human judgment call, not an objective fact — disagreeing with your own earlier labels while reviewing results is a normal, expected part of building an eval set, not a sign of doing it wrong.**
+
+### Real bugs hit while building the harness — both about incomplete data flowing into the report
+- First version's `print_report()` only ever displayed *category* mismatches, silently hiding the far more informative urgency/action-required misses — fixed by adding all three mismatch sections.
+- `evaluate()` computed `urgency_correct`/`action_correct` booleans but never stored the underlying `true_urgency`/`true_action_required` values themselves needed to *display* those mismatches — a real `KeyError`, and a good general lesson: a correctness flag is only useful for reporting if the two raw values it was computed from are also kept around, not just the boolean result.
+
+### Real, measured results — and a specific, non-random pattern in the errors, not just a percentage
+```
+Category accuracy: 89%
+Urgency accuracy: 67%
+Action-required accuracy: 78%
+```
+**Every single urgency miss was off by exactly one adjacent step** (`predicted high, actual medium` — twice; `predicted medium, actual low` — once), never wildly wrong (`low` vs `high`). **Real finding, not just a number: the model has a systematic bias toward over-escalating urgency by one notch, not random noise** — a materially more specific and useful insight than "67% accuracy" alone communicates, and a direct illustration of why urgency (an *ordinal* field) deserves a different evaluation lens than a plain categorical field like `category` — exact-match accuracy treats "off by one" and "maximally wrong" identically, which can understate how reasonable a model's judgment actually is.
+**Both action-required misses predicted `False` when the true label was `True`, on tickets that were either low-urgency or genuinely ambiguous** — a real, explainable pattern: the model appears to conflate "low urgency" with "no action needed," even though the schema treats them as independent judgments. **Concrete, testable next step identified from this, not just filed away:** add an explicit sentence to the system prompt distinguishing the two ("action_required should be True for any confirmed issue regardless of urgency"), then re-run the identical labeled set to see whether the specific misses actually resolve — a real, falsifiable prompt-improvement hypothesis, generated directly from measured evidence rather than guessed at.
+
+---
+
+## Day 15 — *(not started yet)*
