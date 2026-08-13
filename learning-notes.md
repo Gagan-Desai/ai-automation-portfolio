@@ -829,4 +829,46 @@ Action-required accuracy: 78%
 
 ---
 
-## Day 15 — *(not started yet)*
+## Day 15 — Document Data Extraction: Normalization, Not Just Classification
+
+**Goal, deliberately upgraded beyond the roadmap's original "extract fields" scope:** apply Days 13–14's structured-output machinery to real documents, but layer in genuine data-cleaning challenges dates alone never test — currency parsing, informal-text-to-enum normalization, arithmetic cross-validation, and eventually real PDF text extraction (not just plain strings).
+
+### The real design decision — where should normalization happen?
+Two legitimate options: ask the model to normalize directly (simple, but only as reliable as the model's compliance), or **extract raw text exactly as it appears and normalize deterministically in code afterward** — chosen deliberately, since it makes normalization testable independent of the LLM's mood that day. System prompt explicitly instructs the model *not* to reformat dates itself, preserving that separation of concerns.
+
+### New Pydantic tools, each solving a genuinely different problem
+- **`field_validator`** (`mode="before"`) — runs *before* Pydantic's own type coercion, needed when the raw value isn't naturally the target type yet (e.g., `"$1,264.50"` isn't a `float` until stripped of `$`/`,` first — without `mode="before"`, Pydantic would try to coerce the string directly and fail before your cleanup code ever ran).
+- **`model_validator`** (`mode="after"`) — a genuinely different tool from `field_validator`: runs once *all* individual fields have already validated, checking relationships **across multiple fields together** (line items summing to subtotal; subtotal − discount + tax = total) — something no single-field validator can structurally do. Real floating-point lesson: use `abs(a - b) > tolerance`, never `!=`, when comparing computed sums.
+- **`Optional[X] = None`** — the correct way to express "this field may legitimately be absent" (e.g., no invoice number printed anywhere), distinct from Day 13's "required means present, not non-empty" lesson.
+
+### Real PDF extraction — genuinely new foundational skill
+`pdfplumber` used to pull raw text out of an actual PDF file for the first time this roadmap (`page.extract_text()`), rather than a hardcoded Python string. **Two separate, real failure modes discovered and tested deliberately, not stumbled into:**
+- **No detectable table structure** — a hand-typeset invoice (no reportlab `Table`/grid lines, just individually positioned text) makes `extract_tables()` return an empty list entirely; `pdfplumber`'s table detection relies on finding ruling lines or consistent whitespace gutters, which many real small-vendor invoices simply don't have.
+- **A rotated diagonal watermark corrupting the text stream itself** — not just visually, but literally: individual watermark letters bled into real content lines (`"ATax (7%): $136.67"` — a stray `A` glued onto `Tax`). **Real, valuable finding: the LLM extraction pipeline correctly parsed `tax=136.67` despite this character-level corruption** — genuine evidence that LLM-based extraction is materially more resilient to noisy input than a fixed-position or regex-anchored parser would be (a regex matching literal `"Tax"` would have missed `"ATax"` entirely).
+
+---
+
+## Day 16 — Project 1: Document-Processing Bot, Classify-Then-Route Architecture
+
+**Goal, deliberately reframed from the roadmap's literal wording:** old RPA needs a separate fixed template per document type. A genuinely AI-native system shouldn't. Built a two-stage pipeline — classify the document type first, then route to the correct extraction schema — rather than one hardcoded schema, directly foreshadowing Week 6–7's agent routing patterns.
+
+### Architecture — three genuinely reusable pieces
+- **`document_models.py`** — multiple, structurally distinct Pydantic schemas (one set built for invoices/POs/receipts, a second fresh set built for an HR-document domain: `JobApplication`, `ReferenceLetter`, `OfferAcceptance` — genuinely different shapes, not relabeled copies, to make classification meaningfully necessary rather than trivial).
+- **`classifier.py`** — a lightweight, separate LLM call using a tiny schema (just a `DocumentType` enum), reusing the exact `json_object` structured-output pattern from Day 13, applied to a much simpler classification task rather than full extraction.
+- **`registry.py`** — a dict mapping each classified type to its `{model, instruction}` pair. Adding a fourth document type later means adding one registry entry, not rewriting the pipeline.
+
+### `generic_extractor.py` — the real engineering challenge, genuine code reuse proven, not just claimed
+Genericized Day 13–15's hardcoded `extract_ticket_json_schema`/`extract_invoice` functions into one: `extract_document(text, model_class: Type[T], instruction) -> T`. **New Python tool: `TypeVar`/`Type[T]`** — declares "whatever class is passed in, the same class comes back out," giving real type-safety across a genuinely generic function, rather than the function body needing to know which specific schema it's working with. Same `json_object` + validation + corrective-retry loop underneath, completely unchanged — only the schema and prompt are now parameters instead of hardcoded.
+
+### `process_folder.py` — real production batch-processing pattern
+Loops a real folder of mixed PDFs, classifying and extracting each independently, with the entire per-file body wrapped in `try/except`. **The genuinely important production requirement this enforces: one malformed or misclassified document must never crash the whole batch** — a failure is caught, logged with its filename and error, and added to the results list as a `"failed"` entry, while every other file in the folder still completes normally. Directly reuses the failure-isolation instinct from the n8n dead-lettering work earlier in the roadmap, expressed in plain Python.
+
+### Real, complete proof — same infrastructure, two unrelated domains, zero code changes
+Ran the identical `generic_extractor.py`/`process_folder.py` against **six different document schemas across two structurally unrelated domains** (invoices/purchase orders/receipts, then job applications/reference letters/offer forms) with no changes to the extraction engine itself — only new schema files and a new registry. **The single hardest, most convincing result:** `ReferenceLetter.recommendation_strength` correctly inferred as `"strong"` from a letter that never once uses that literal word anywhere in its text — synthesized from tone and intensity across a full paragraph ("strongest possible recommendation," "without reservation"), a categorically harder task than any explicit-value extraction from Days 13–15. Currency parsing, dual-date normalization, and enum classification all confirmed working correctly on the same document in the same run.
+
+### Engineering hygiene
+Hit a real, instructive import mismatch after manually removing a naming prefix (`hr_`) from several files: confirmed via `python3 -c "import classifier; print(classifier.__file__)"` that Python's actual runtime import and VS Code's Cmd+click "Go to Definition" can resolve differently — the editor's static analysis is not proof of what will actually execute. **Real lesson: when editor navigation and runtime behavior disagree, trust `__file__`, not the IDE.**
+
+---
+
+## Day 17 — *(not started yet — buffer/research, deliberately breaking Project 1 on messy documents)*
