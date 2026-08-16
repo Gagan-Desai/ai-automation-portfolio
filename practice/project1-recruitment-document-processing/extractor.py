@@ -1,10 +1,12 @@
 import json
 from typing import Type, TypeVar
 from dotenv import  load_dotenv
-
+from logger_setup import setup_logger, log_event
 load_dotenv()
 from groq import Groq
 from pydantic import BaseModel, ValidationError
+
+logger = setup_logger()
 
 client = Groq()
 
@@ -30,6 +32,7 @@ def extract_document(text: str, model_class: Type[T], instruction: str, max_retr
             parsed = json.loads(raw)
             return model_class(**parsed)
         except (json.JSONDecodeError, ValidationError) as e:
+            log_event(logger, "warning", "Extraction attempt failed", attempt=attempt + 1, model_class=model_class.__name__, error=str(e))
             print(f"\n--- Attempt {attempt + 1} failed ---\n{e}\n")
             messages.append({"role": "assistant", "content": raw})
             messages.append({"role": "user", "content": f"That response failed validation: {str(e)}. Provide a corrected JSON response matching the schema exactly."})

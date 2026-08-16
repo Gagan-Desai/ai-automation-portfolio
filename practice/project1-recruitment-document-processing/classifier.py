@@ -13,6 +13,7 @@ class DocumentType(str, Enum):
     job_application = "job_application"
     reference_letter = "reference_letter"
     offer_acceptance = "offer_acceptance"
+    unknown = "unknown"
 
 class Classification(BaseModel):
     document_type: DocumentType
@@ -22,7 +23,7 @@ def classify_document(text: str) -> DocumentType:
     response = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {"role": "system", "content": f"Classify this HR document as one of: job_application, reference_letter, offer_acceptance. Respond with JSON matching this schema: {json.dumps(schema)}"},
+            {"role": "system", "content": f"Classify this HR document as one of: job_application, reference_letter, offer_acceptance. If it does not clearly and confidently match one of these three types, classify it as 'unknown' rather than guessing. Respond with JSON matching this schema: {json.dumps(schema)}"},
             {"role": "user", "content": text}
         ],
         response_format={"type": "json_object"}
