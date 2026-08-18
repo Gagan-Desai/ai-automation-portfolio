@@ -20,7 +20,7 @@ class ConfidenceAssessment(BaseModel):
 def assess_confidence(text: str, extracted_data: dict) -> ConfidenceAssessment:
     schema = ConfidenceAssessment.model_json_schema()
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-20b",
         messages=[
             {"role": "system", "content": f"Given the original document and the extracted data, rate your confidence in each field as high/medium/low, with a brief reason. Respond with JSON matching this schema: {json.dumps(schema)}"},
             {"role": "user", "content": f"Original document:\n{text}\n\nExtracted data:\n{json.dumps(extracted_data)}"}

@@ -12,7 +12,8 @@ This project replaces that with a two-stage AI pipeline: **classify the document
 
 ```mermaid
 graph TD
-    A[process_folder / API request] --> B[classify_document]
+    A[process_folder / API request] --> P[run_document_pipeline]
+    P --> B[classify_document]
     B --> C[Registry lookup]
     C --> D[extract_document]
     D --> E[assess_confidence]
@@ -20,7 +21,7 @@ graph TD
     D -.-> F
 ```
 
-A document enters through either a batch folder processor or the `/extract` API endpoint. It's classified into one of the registered types (or explicitly flagged as `unknown` if it doesn't confidently match anything), routed to the matching Pydantic schema, extracted with automatic retry-on-validation-failure, and passed through a confidence assessment before being marked complete. Every step logs a structured, timestamped event.
+A document enters through either a batch folder processor or the `/extract` API endpoint. Both call the same shared `run_document_pipeline()` function — classify into one of the registered types (or explicitly flagged as `unknown` if it doesn't confidently match anything), route to the matching Pydantic schema, extract with automatic retry-on-validation-failure, and pass through a confidence assessment before being marked complete. Every step logs a structured, timestamped event.
 
 ## Key design decisions
 
@@ -34,6 +35,8 @@ A document enters through either a batch folder processor or the `/extract` API 
 
 **Deterministic validation over self-reported trust.** Every extracted field passes through Pydantic validation (type coercion, enum constraints, cross-field arithmetic checks via `model_validator`) before it's ever considered "extracted." A retry loop feeds specific validation errors back to the model for correction, rather than accepting the first response that happens to parse.
 
+**One shared pipeline, not duplicated logic per consumer.** The batch folder processor and the API's background job handler both call the same `run_document_pipeline()` function rather than each reimplementing the classify → extract → confidence sequence independently. This was a deliberate refactor after noticing the two had drifted into near-identical, separately-maintained copies of the same logic — a real DRY violation that would have meant any future fix or new step needing to be made correctly in two places to avoid the batch processor and the API silently behaving differently on identical input.
+
 ## Real findings from testing
 
 This system was deliberately stress-tested with adversarial documents, not just happy-path examples. The results are documented here honestly, including the failures — a system's real limitations are more useful to know than a claim of perfection.
@@ -46,14 +49,32 @@ This system was deliberately stress-tested with adversarial documents, not just 
 
 - **Malformed or corrupted source text does not necessarily break extraction.** A test invoice with a rotated watermark that corrupted the underlying PDF text stream (producing garbled strings like `"ATax (7%)"` instead of `"Tax (7%)"`) still extracted correctly — real evidence that LLM-based extraction is materially more resilient to noisy input than a fixed-position or regex-based parser would be.
 
-## API
+## Authentication
+
+Every endpoint requires an `X-API-Key` header. This is a shared-secret model — one API key, generated once and distributed directly to anyone who needs access — appropriate for this project's current scope, not a multi-user key registry.
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Add the generated value to `.env` as `API_KEY=...` (never committed — excluded via `.gitignore`, same discipline applied to `GROQ_API_KEY` throughout this project).
+
+```bash
+curl -X POST http://127.0.0.1:8000/extract -H "X-API-Key: your-real-key-here" -F "file=@job_application.pdf"
+```
+
+A missing or incorrect key returns `401 Unauthorized` before any of the endpoint's actual logic runs — enforced via FastAPI's dependency injection (`Depends(verify_api_key)`), which rejects the request at the routing layer rather than requiring each endpoint to check manually.
+
+**Honest limitation, stated plainly:** a shared key has no per-user revocation and no way to attribute a request to a specific caller — every request is indistinguishable from any other holder of the key. Sufficient for sharing this project with a small number of trusted reviewers; a genuinely public or multi-tenant version would need individual, database-backed API keys instead.
+
+**Sharing access beyond localhost:** the server binds to `127.0.0.1` by default, which is reachable only from the machine it runs on — a valid API key alone does not make it accessible to anyone else. For a quick demo, a tool like `ngrok` (`ngrok http 8000`) creates a temporary public URL forwarding to the local server; a permanent deployment requires actual cloud hosting, out of scope for this project's current stage.
 
 ### `POST /extract`
 
 Accepts a PDF file upload, returns a job ID immediately.
 
 ```bash
-curl -X POST http://127.0.0.1:8000/extract -F "file=@job_application.pdf"
+curl -X POST http://127.0.0.1:8000/extract -H "X-API-Key: your-real-key-here" -F "file=@job_application.pdf"
 ```
 
 ```json
@@ -65,7 +86,7 @@ curl -X POST http://127.0.0.1:8000/extract -F "file=@job_application.pdf"
 Poll for the result. Status is one of `processing`, `success`, `needs_review`, or `failed`.
 
 ```bash
-curl http://127.0.0.1:8000/status/bc0b8c8c-80e2-4d2e-80f8-eeb42eea4e85
+curl http://127.0.0.1:8000/status/bc0b8c8c-80e2-4d2e-80f8-eeb42eea4e85 -H "X-API-Key: your-real-key-here"
 ```
 
 ```json
@@ -130,8 +151,10 @@ classifier.py          # LLM-based document type classification
 registry.py             # Maps document type -> schema + extraction instruction
 generic_extractor.py   # Generic extract-validate-retry pipeline
 confidence.py           # Self-reported per-field confidence assessment
+pipeline.py              # Shared classify -> extract -> confidence pipeline
 logger_setup.py         # Structured JSON logging
 api_models.py            # FastAPI request/response contracts
+auth.py                  # API key authentication
 main.py                  # FastAPI application, async job orchestration
 process_folder.py       # Batch folder processing (non-API entry point)
 ```
@@ -142,7 +165,7 @@ process_folder.py       # Batch folder processing (non-API entry point)
 conda activate ai-automation
 python3 -m pip install fastapi uvicorn python-multipart groq pydantic python-dotenv pdfplumber
 
-# .env file with GROQ_API_KEY=your_key_here
+# .env file with GROQ_API_KEY=your_key_here and API_KEY=your_generated_key_here
 
 python3 -m uvicorn main:app --reload
 ```

@@ -3,8 +3,11 @@
 import uuid
 import io
 import pdfplumber
+from typing import List
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
-from rpds import List
+from fastapi import Depends
+from auth import verify_api_key
+
 
 from classifier import classify_document
 from registry import DOCUMENT_REGISTRY
@@ -39,7 +42,7 @@ def process_document_job(job_id: str, text: str):
 
 
 @app.post("/extract", status_code=202)
-async def extract(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def extract(background_tasks: BackgroundTasks, file: UploadFile = File(...), api_key: str = Depends(verify_api_key)):
     contents = await file.read()
     with pdfplumber.open(io.BytesIO(contents)) as pdf:
         text = "\n".join(page.extract_text() for page in pdf.pages)
@@ -51,7 +54,7 @@ async def extract(background_tasks: BackgroundTasks, file: UploadFile = File(...
     return {"job_id": job_id, "status": "processing"}
 
 @app.post("/extract-batch")
-async def extract_batch(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+async def extract_batch(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), api_key: str = Depends(verify_api_key)):
     job_ids = []
     for file in files:
         contents = await file.read()
@@ -65,7 +68,7 @@ async def extract_batch(background_tasks: BackgroundTasks, files: List[UploadFil
 
 
 @app.get("/status/{job_id}")
-async def status(job_id: str):
+async def status(job_id: str, api_key: str = Depends(verify_api_key)):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **jobs[job_id]}

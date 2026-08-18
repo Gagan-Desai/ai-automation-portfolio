@@ -13,10 +13,18 @@ class ExtractResponse(BaseModel):
     job_id: str
     status: JobStatus
 
+
+
+class FieldConfidenceInfo(BaseModel):
+    field_name: str
+    confidence: str
+    reason: str
+
 class StatusResponse(BaseModel):
     job_id: str
     status: JobStatus
     document_type: Optional[str] = None
     data: Optional[dict] = None
-    low_confidence_fields: Optional[List[str]] = None
+    confidence_details: Optional[List[FieldConfidenceInfo]] = None
     error: Optional[str] = None
+

@@ -22,7 +22,7 @@ def extract_document(text: str, model_class: Type[T], instruction: str, max_retr
 
     for attempt in range(max_retries):
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=messages,
             response_format={"type": "json_object"}
         )
