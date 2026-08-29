@@ -949,4 +949,51 @@ Documented the problem (fixed RPA templates vs. classify-then-route), the archit
 
 ---
 
-## Day 25 — *(not started yet)*
+## Day 25 — Retrieval: A Real, Table-Corruption Bug Found and Fixed Before Trusting Any Result
+
+**The core retrieval function:** embed the question with the same model used on documents, query ChromaDB, return top-k chunks by cosine distance. Real gotcha worth remembering precisely: Chroma returns **distance**, not similarity — lower means more relevant, the inverse of Day 24's similarity scores, easy to get backwards without checking directly.
+
+**A genuine extraction-layer bug discovered through real retrieval results, not caught until this point:** a real question about insurance conflicts-of-interest returned a chunk containing `"...Contracts Act 2019, 19/act/53/enacted/en/html renewed, inform the consumer..."` — nonsensical prose. Root cause, confirmed by manual inspection of the source PDF: **the document contains genuine tables**, and `pdfplumber`'s default `extract_text()` reads by vertical position, silently concatenating separate table columns into one false, misleading sentence — a materially worse failure than Day 15's gridless-invoice problem, since the corrupted text looked like legitimate, confident prose rather than obviously broken output.
+
+**The fix — detect and handle tables explicitly, rather than let them silently masquerade as prose:**
+```python
+def extract_page_content(page):
+    tables = page.extract_tables()
+    if tables:
+        return "\n".join(" | ".join(str(c) if c else "" for c in row) for table in tables for row in table)
+    return page.extract_text() or ""
+```
+**Real, important lesson: honest-but-messy (`"cell | cell | cell"`) is categorically safer than clean-looking-but-wrong** — a model reading pipe-delimited fragments can infer "this is structured reference data"; a model reading smoothly-concatenated garbage has no signal anything is corrupted, and can confidently build an answer on scrambled nonsense. **Required rebuilding chunking and embeddings from scratch** after the fix — stale corrupted vectors don't self-correct by adding new ones on top; the collections had to be deleted and rebuilt.
+
+**MMR (Maximal Marginal Relevance) implemented for diversity-aware retrieval** — real, hands-on numpy work: `@` for batched matrix-multiplication similarity (all candidates scored against the query in one operation), a greedy per-step selection loop where each pick's score is `λ × relevance − (1−λ) × max_similarity_to_already_selected`. **`λ=1.0` collapses to plain top-k; `λ=0.0` chases pure novelty even at the cost of relevance** — confirmed both extremes conceptually and tested `λ=0.6` as a real, deliberate balance.
+**Real, honest finding from live testing:** MMR did **not** always fix visible redundancy — two near-duplicate chunks from the same document survived together on one real test question even with MMR active, traced to the candidate pool itself being dominated by one document (5/10 candidates), not a bug in the MMR logic. **General lesson: MMR can only diversify among what it's given — a redundant candidate pool constrains it regardless of the diversity weighting.**
+
+## Day 26 — The Full RAG Loop: Grounded vs. Ungrounded, With Real Hallucination Evidence
+
+**The critical piece is the system prompt, not the retrieval mechanics:** without an explicit instruction restricting the model to *only* the provided context, nothing stops it from silently falling back on training knowledge even when retrieval works perfectly — the prompt is what forces grounding, retrieval only supplies the evidence.
+
+**Real, documented `gpt-oss` model behavior hit directly, not guessed at:** these are reasoning models that route internal deliberation into a separate `reasoning` field by default — and a real, reported failure mode is the *entire* token budget getting consumed by reasoning before any visible answer is written, producing an empty `content` with `finish_reason: "length"`. **Fixed with `reasoning_effort="low"` and `include_reasoning=False`** — real, documented parameters specific to this model family, not general OpenAI-API options.
+
+**The actual, decisive evidence — two real, reproducible comparisons on the exact same live corpus:**
+1. **Specific-fact hallucination:** asked which Consumer Protection Code provisions cover insurance conflicts of interest. **Ungrounded:** confidently cited "Article 5.3" and "Article 5.4" in a polished table — completely fabricated. **Grounded:** correctly cited "Article 19" and "Provisions 3.28–3.35," matching real retrieved text.
+2. **Wholesale narrative fabrication:** asked about CP158 consultation outcomes. **Ungrounded** generated an entire invented regulatory history — fake section numbers, a fabricated direct quote attributed to the Central Bank, a fake effective date — while **grounded** correctly, honestly declined: *"I cannot answer this based on the provided documents."* **The honest refusal is the objectively correct, trustworthy behavior — not a limitation.**
+3. **A subtler, more dangerous variant found on a third question:** an ungrounded answer about vulnerable-customer protections cited **the UK's FCA and US HIPAA law** — entirely wrong jurisdictions for a question specifically about Irish Central Bank guidance — confidently blended three different countries' frameworks into one answer with no signal anything had gone wrong.
+
+## Day 27 — Project 2: Streamlit Knowledge Assistant, Built to Demonstrate the Comparison Live
+
+**Genuinely new execution model, worth understanding before writing UI code:** Streamlit reruns the *entire script* top to bottom on every user interaction — no persistent event loop the way FastAPI's routes work. `@st.cache_resource` is a real necessity, not an optimization: without it, the embedding model would reload on every click.
+
+**Deliberate design decision to raise the bar:** built the grounded/ungrounded comparison directly into the UI (a toggle-controlled side-by-side view), rather than a bare Q&A tool — turning the strongest evidence from Day 26 into something a recruiter can trigger themselves live, not just read about.
+
+**A real, honest engineering conversation that reshaped how validation is framed:** raised directly — as a developer without domain expertise, how do you validate outputs in a regulated field? **The correct, real answer: you don't personally validate domain correctness — that's a Subject Matter Expert's job in any real deployment.** What an engineer *can* and should validate: citation/source verification (mechanical, not domain-dependent), refusal-behavior and consistency testing (exactly what Days 17–26 already did), and structural sanity checks. Real production pattern worth naming: SME review cycles, human-in-the-loop staged rollout, and formal model risk governance (increasingly shaped by the EU AI Act for high-risk systems) — the division of labor between "engineer builds trustworthy properties" and "expert validates domain content" is how real regulated AI deployments are structured, not a gap in personal skill.
+
+**RAGAS — attempted, hit four separate real bugs, replaced with a custom equivalent, and this was the right call, not a failure:**
+1. Unconditional `ChatVertexAI` import crashing the library for every non-Google-Cloud user (confirmed via multiple open GitHub issues) — fixed by removing the dead import.
+2. `AnswerRelevancy` requiring an `embeddings` parameter with real, confirmed cross-version API drift (`HuggingfaceEmbeddings` vs `HuggingFaceEmbeddings`, `model_name=` vs `model=`).
+3. A genuine Groq-specific tool-calling incompatibility — `ragas` defaults non-OpenAI providers to `instructor`'s `Mode.TOOLS`, and Groq's strict tool-call validation rejected the resulting synthetic `"JSON"` tool call. Confirmed via direct inspection of `ragas`'s own source (DeepWiki analysis showing OpenAI itself needed a `Mode.JSON` override for unrelated reasons) that Groq likely needed the identical override.
+4. Attempting that exact override (`mode=instructor.Mode.JSON`) surfaced a `TypeError` from an internal keyword-argument collision inside `ragas` itself — the library was already setting `mode` internally, a genuine internal bug, not a usage error.
+**The pivot:** built a custom faithfulness function using the *same* claim-decomposition methodology, on the project's own already-proven `json_object` + Pydantic pipeline. **Real, measured result: grounded answer scored `1.00` faithfulness (every claim traced to real retrieved text with specific justification per claim); the fabricated answer scored `0.00` (zero claims supported)** — a clean, quantified, reproducible confirmation of everything observed by eye across Day 26, on infrastructure trusted all project rather than a third-party library that failed four separate times. **Real lesson worth carrying forward: recognizing when a dependency's cost exceeds its value, and building the specific needed piece using already-proven internal tools, is a legitimate engineering decision — not a consolation for failing to make a library work.**
+
+---
+
+## Day 28 — *(not started yet — buffer/research, tuning chunk size/overlap)*
