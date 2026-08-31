@@ -13,6 +13,7 @@ db_client = chromadb.PersistentClient(path="./chroma_db")
 groq_client = Groq()
 
 collection_sentence = db_client.get_collection("documents_sentence")
+collection_fixed = db_client.get_collection("documents_fixed")
 
 def retrieve(question: str, collection, top_k: int = 10, use_mmr: bool = True, final_k: int = 3, lambda_param: float = 0.6):
     question_embedding = model.encode([question]).tolist()[0]
@@ -25,7 +26,7 @@ def retrieve(question: str, collection, top_k: int = 10, use_mmr: bool = True, f
     return docs, metas
 
 
-def rag_answer(question: str, collection=collection_sentence):
+def rag_answer(question: str, collection=collection_fixed):
     docs, metas = retrieve(question, collection)
     context = "\n\n".join(f"[Source: {m['source']}]\n{d}" for d, m in zip(docs, metas))
     system_prompt = (

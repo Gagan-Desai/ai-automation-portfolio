@@ -5,6 +5,7 @@ from typing import List
 from pydantic import BaseModel
 from groq import Groq
 from rag_core import rag_answer
+import chromadb
 
 client = Groq()
 
@@ -49,15 +50,18 @@ def check_faithfulness(question: str, answer: str, contexts: list[str]):
     score = supported / len(result.claims) if result.claims else 0.0
     return score, result.claims
 
+db_client = chromadb.PersistentClient(path="./chroma_db")
+collection_fixed = db_client.get_collection("documents_fixed")
+
 question="What methodology should firms use to assess consumer protection risk?"
-answer, docs = rag_answer(question)
+answer, docs = rag_answer(question, collection_fixed)
 
 ungrounded_answer = """A practical, repeatable framework for assessing consumer‑protection risk...
 Step 1: Define the scope & objectives... Step 7: Evaluate controls & mitigations (ISO 31000 or NIST CSF frameworks)..."""
 
 score, claims = check_faithfulness(
     question=question,
-    answer=ungrounded_answer,
+    answer=answer,
     contexts=docs
 )
 print(f"Faithfulness: {score:.2f}")

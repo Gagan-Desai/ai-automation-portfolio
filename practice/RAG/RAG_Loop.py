@@ -20,6 +20,9 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 def rag_answer(question: str, collection, top_k: int = 5, use_mmr: bool = True, final_k: int = 3, lambda_param: float = 0.6):
     question_embedding = model.encode([question]).tolist()[0]
     print(f"question_embedding length: {len(question_embedding)}")
+
+    print(f"Collection: {collection.name}")
+    print(f"Item count: {collection.count()}")
     raw_results = collection.query(
         query_embeddings=[question_embedding],
         n_results=top_k,
@@ -61,7 +64,7 @@ def answer_without_retrieval(question: str) -> str:
         reasoning_effort="low",
         include_reasoning=False,
     )
-    #print(response)
+    print(response)
     print("finish_reason:", response.choices[0].finish_reason)
     return response.choices[0].message.content
 
@@ -70,7 +73,7 @@ def answer_without_retrieval(question: str) -> str:
 filenames = [
     "resources/general_guidance.pdf",
     "resources/securing_customers_interests.pdf",
-    "resources/vulnerable_circumstances.pdf",
+    
     "resources/risk_assessment_guide.pdf",
     "resources/cp158_consultation.pdf",
     "resources/cp158_feedback.pdf",
@@ -110,7 +113,7 @@ def retrieve(question: str, collection, top_k: int = 3):
 
 
 #question = "According to the Central Bank of Ireland's guidance, which specific provisions of the Consumer Protection Code deal with conflicts of interest and transparency for insurance distributors?"
-question = "What specific changes did the Central Bank of Ireland make to the Consumer Protection Code as a result of industry feedback during the CP158 consultation process, and what was the stated rationale?"
+question = "What methodology should firms use to assess consumer protection risk?"
 results = retrieve(question, collection_fixed, top_k=3)
 
 results_sentence = retrieve(question, collection_sentence, top_k=3)
@@ -134,7 +137,7 @@ print(answer_without_retrieval(question))
 
 
 print("\n=== WITH RETRIEVAL (full RAG) ===")
-answer, docs, metas = rag_answer(question, collection_sentence)
+answer, docs, metas = rag_answer(question, collection_fixed)
 print(answer)
 for doc, meta in zip(docs, metas):
     print(f"--- {meta['source']} ---")
