@@ -7,11 +7,16 @@ from dotenv import load_dotenv
 from MMR import mmr
 
 load_dotenv()
+import os
+
+
 
 @st.cache_resource
 def load_resources():
     model = SentenceTransformer("all-MiniLM-L6-v2")
-    db_client = chromadb.PersistentClient(path="./chroma_db")
+    #db_client = chromadb.PersistentClient(path="./chroma_db")
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    db_client = chromadb.PersistentClient(path=os.path.join(BASE_DIR, "chroma_db"))
     groq_client = Groq()
     return model, db_client, groq_client
 
