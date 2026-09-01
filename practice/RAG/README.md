@@ -1,5 +1,7 @@
 # Financial Services Regulatory Knowledge Assistant
 
+**[Live demo →](https://ai-automation-portfolio-82ggwcuct5xn3hsnvmdagp.streamlit.app)**
+
 A Retrieval-Augmented Generation system that answers questions grounded in real Central Bank of Ireland regulatory documents — built specifically to demonstrate, with measured evidence, why grounding matters and where it can still fall short.
 
 ## The problem
@@ -50,6 +52,8 @@ Documented honestly, including what didn't work, because a system's real limitat
 
 - **A third-party evaluation library (RAGAS) was attempted and ultimately replaced.** Four separate, confirmed issues were diagnosed through direct investigation — an unconditional import of a deprecated dependency crashing the library outright, a breaking API change in its embeddings interface, a genuine incompatibility between the library's internal tool-calling mechanism and this provider's strict validation, and an internal keyword-argument collision when attempting the documented workaround. Rather than continue patching an unreliable dependency, an equivalent faithfulness metric was implemented directly using the project's own proven structured-output pipeline (Pydantic validation over JSON-mode responses), reusing the identical claim-decomposition methodology.
 
+- **A preliminary chunk-size sweep suggested larger chunks may better preserve specific regulatory detail for this corpus.** Testing one real question across three chunk sizes, only the largest (1000 characters) captured all four key specifics of the correct answer, including an internal system name (PRISM) unique to the real source document; smaller sizes captured the general topic but lost the specific mechanism. Based on a single test question — a genuinely promising direction, not yet a settled conclusion, and worth extending across more questions before treating as a final configuration choice.
+
 ## Known limitations
 
 - **The evaluation set is small and hand-picked, not a systematic benchmark.** A handful of deliberately varied real test questions were used to surface genuine failure modes; a production system would need a larger, more systematically constructed evaluation set (industry practice commonly runs 50–200 question/answer pairs) to make confident, general claims about retrieval quality.
@@ -76,6 +80,10 @@ app.py                    # Streamlit interface
 ## Running it locally
 
 ```bash
+git lfs install
+git clone <this-repo-url>
+cd practice/RAG
+
 conda activate ai-automation
 python3 -m pip install streamlit chromadb sentence-transformers groq pydantic python-dotenv pdfplumber
 
@@ -83,3 +91,9 @@ python3 -m pip install streamlit chromadb sentence-transformers groq pydantic py
 
 python3 -m streamlit run app.py
 ```
+
+**Note:** the pre-built vector database is tracked via Git LFS due to its size. `git lfs install` must be run *before* cloning, or the repository will contain unresolved pointer files instead of the actual database content.
+
+## Deployment
+
+Deployed live on Streamlit Community Cloud. The vector store, tracked via Git LFS, is committed directly to the repository rather than rebuilt at deploy time. One deployment-specific fix was required: `ChromaDB`'s persistent client path was changed from a relative path to one resolved against the script's own file location (`os.path.dirname(os.path.abspath(__file__))`), since the deployment platform's working directory differs from a local development environment — a general lesson about not assuming local filesystem behavior carries over to a hosted environment unchanged.
